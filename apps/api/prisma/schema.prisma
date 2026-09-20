@@ -1,0 +1,223 @@
+// MarketLens core data model.
+//
+// Design principle: Market, Commodity, and PriceObservation are deliberately
+// source-agnostic so vegetables (data.gov.in), medicines (NPPA), and LPG
+// (manual/experimental) can all be stored in the same shape. Forecasts,
+// anomalies, and spike-risk scores reference a Market+Commodity pair and
+// carry a modelVersion so multiple model generations can coexist and be
+// compared. Nothing in this schema is populated by ML/AI logic yet -
+// that begins in Milestone 2 (ingestion) and Milestone 5/6 (ML, LLM).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Reference data
+// ---------------------------------------------------------------------------
+
+enum DataSource {
+  DATA_GOV_IN
+  NPPA
+  MANUAL
+}
+
+enum CommodityCategory {
+  VEGETABLE
+  MEDICINE
+  LPG
+}
+
+model Market {
+  id        String     @id @default(cuid())
+  name      String
+  state     String
+  district  String?
+  source    DataSource
+  latitude  Float?
+  longitude Float?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  priceObservations PriceObservation[]
+  forecastResults   ForecastResult[]
+  anomalyFlags      AnomalyFlag[]
+  spikeRiskScores   SpikeRiskScore[]
+  alerts            Alert[]
+
+  // A given market name is expected to be unique within a state/district,
+  // which keeps ingestion upserts idempotent.
+  @@unique([name, state, district])
+  @@index([state])
+}
+
+model Commodity {
+  id       String            @id @default(cuid())
+  name     String
+  category CommodityCategory
+  unit     String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  priceObservations PriceObservation[]
+  forecastResults   ForecastResult[]
+  anomalyFlags      AnomalyFlag[]
+  spikeRiskScores   SpikeRiskScore[]
+  alerts            Alert[]
+
+  @@unique([name, category])
+  @@index([category])
+}
+
+// ---------------------------------------------------------------------------
+// Observed data (populated starting Milestone 2)
+// ---------------------------------------------------------------------------
+
+model PriceObservation {
+  id           String   @id @default(cuid())
+  marketId     String
+  commodityId  String
+  date         DateTime @db.Date
+  price        Float // normalized to Commodity.unit
+  minPrice     Float?
+  maxPrice     Float?
+  modalPrice   Float?
+  qualityFlag  String? // e.g. "OUTLIER_SUSPECT" - set by ingestion cleaning, never silently dropped
+  sourceRecord String? // traceability id/ref back to the raw ingested record
+
+  createdAt DateTime @default(now())
+
+  market    Market    @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  commodity Commodity @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+
+  @@unique([marketId, commodityId, date])
+  @@index([commodityId, date])
+}
+
+model RawIngestionLog {
+  id            String   @id @default(cuid())
+  source        DataSource
+  fetchedAt     DateTime @default(now())
+  status        String // SUCCESS | PARTIAL | FAILED
+  rawPayloadRef String? // path/blob reference, not the full payload inline
+  notes         String?
+}
+
+// ---------------------------------------------------------------------------
+// ML outputs (populated starting Milestone 4/5)
+// ---------------------------------------------------------------------------
+
+model ForecastResult {
+  id            String   @id @default(cuid())
+  marketId      String
+  commodityId   String
+  generatedAt   DateTime @default(now())
+  forecastDate  DateTime @db.Date
+  predictedPrice Float
+  lowerBound    Float?
+  upperBound    Float?
+  modelVersion  String
+  horizonDays   Int
+
+  market      Market      @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  commodity   Commodity   @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+  explanation Explanation?
+
+  @@index([marketId, commodityId, forecastDate])
+}
+
+model AnomalyFlag {
+  id             String   @id @default(cuid())
+  marketId       String
+  commodityId    String
+  date           DateTime @db.Date
+  observedPrice  Float
+  expectedPrice  Float
+  deviationPct   Float
+  isAnomaly      Boolean
+  method         String // e.g. "zscore" | "IQR" | "STL_residual"
+
+  market      Market      @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  commodity   Commodity   @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+  explanation Explanation?
+
+  @@index([marketId, commodityId, date])
+}
+
+model SpikeRiskScore {
+  id              String   @id @default(cuid())
+  marketId        String
+  commodityId     String
+  asOfDate        DateTime @db.Date
+  riskProbability Float
+  horizonDays     Int
+  modelVersion    String
+
+  market      Market      @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  commodity   Commodity   @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+  explanation Explanation?
+
+  @@index([marketId, commodityId, asOfDate])
+}
+
+// ---------------------------------------------------------------------------
+// AI explanations (populated starting Milestone 6)
+// ---------------------------------------------------------------------------
+
+model Explanation {
+  id               String   @id @default(cuid())
+  forecastResultId String?  @unique
+  anomalyFlagId    String?  @unique
+  spikeRiskScoreId String?  @unique
+  llmModel         String
+  promptVersion    String
+  explanationText  String
+  generatedAt      DateTime @default(now())
+
+  forecastResult ForecastResult? @relation(fields: [forecastResultId], references: [id], onDelete: Cascade)
+  anomalyFlag    AnomalyFlag?    @relation(fields: [anomalyFlagId], references: [id], onDelete: Cascade)
+  spikeRiskScore SpikeRiskScore? @relation(fields: [spikeRiskScoreId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Users & alerts (schema present now for extensibility; no auth/API yet)
+// ---------------------------------------------------------------------------
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+
+  alerts Alert[]
+}
+
+enum AlertCondition {
+  PRICE_ABOVE
+  PRICE_BELOW
+  SPIKE_RISK_ABOVE
+  ANOMALY_DETECTED
+}
+
+model Alert {
+  id          String         @id @default(cuid())
+  userId      String
+  marketId    String
+  commodityId String
+  condition   AlertCondition
+  threshold   Float?
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  market    Market    @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  commodity Commodity @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}

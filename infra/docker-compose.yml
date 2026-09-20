@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: marketlens-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: marketlens
+      POSTGRES_PASSWORD: marketlens
+      POSTGRES_DB: marketlens
+    ports:
+      - "5432:5432"
+    volumes:
+      - marketlens-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketlens"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  marketlens-postgres-data:

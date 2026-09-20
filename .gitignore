@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Env files
+.env
+.env.local
+!.env.example
+
+# Build output
+dist/
+build/
+
+# Prisma
+apps/api/prisma/migrations/dev.db
+
+# Frontend
+apps/web/dist/
+
+# Python (future ML milestones)
+ml/.venv/
+ml/__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+*.log
+.vscode/
+.idea/

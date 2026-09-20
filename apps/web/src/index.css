@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@import "@fontsource/fraunces/500.css";
+@import "@fontsource/fraunces/600.css";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+/*
+ * MarketLens design system.
+ *
+ * Reference points studied (patterns, not pixels): Bloomberg-style terminal
+ * data density and tabular figure discipline; FT/Economist-style use of a
+ * single restrained brand hue instead of generic SaaS gradients; Linear's
+ * typographic discipline and hairline-over-shadow elevation; TradingView's
+ * historical-vs-forecast chart convention (solid vs dashed series).
+ *
+ * Three-typeface system, each with one job:
+ *   - Fraunces (serif): the wordmark and page titles ONLY. Everything else
+ *     stays sans, so the serif reads as a considered brand accent rather
+ *     than an "editorial blog" default.
+ *   - IBM Plex Sans: all UI chrome, labels, body copy.
+ *   - IBM Plex Mono: every numeric value (prices, deltas, percentages,
+ *     dates, chart axis ticks). Monospaced figures are what make a table
+ *     of prices scannable at a glance - this is the single biggest
+ *     typographic decision separating "serious data product" from
+ *     "generic dashboard template".
+ */
+@theme {
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-paper: #f3f3ef;
+  --color-paper-raised: #ffffff;
+  --color-paper-sunken: #eceae4;
+  --color-ink: #181c21;
+  --color-ink-muted: #5c6570;
+  --color-ink-faint: #8d949c;
+  --color-line: #dedfda;
+  --color-line-strong: #c7c9c2;
+
+  --color-accent: #b5651d;
+  --color-accent-strong: #93511a;
+  --color-accent-soft: #f3e4d2;
+
+  --color-risk: #b23a2e;
+  --color-risk-soft: #f5dedb;
+
+  --color-stable: #3f7a52;
+  --color-stable-soft: #dcebdf;
+
+  --color-chart-historical: #181c21;
+  --color-chart-forecast: #b5651d;
+  --color-chart-anomaly: #b23a2e;
+  --color-chart-grid: #dedfda;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+/* Tabular/numeric figures: applied explicitly via the .font-mono utility
+   Tailwind derives from --font-mono, plus lining + tabular OpenType
+   features so a column of prices lines up on its decimal point. */
+.font-mono {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
