@@ -13,10 +13,18 @@ build/
 # Prisma
 apps/api/prisma/migrations/dev.db
 
+# Ingestion logs (rejected-record investigation files)
+apps/api/logs/*
+!apps/api/logs/.gitkeep
+
+# Downloaded CSV files for the ingestion fallback path (large, not source)
+apps/api/data-imports/*
+!apps/api/data-imports/.gitkeep
+
 # Frontend
 apps/web/dist/
 
-# Python (future ML milestones)
+# Python (ml/)
 ml/.venv/
 ml/__pycache__/
 *.pyc

@@ -1,10 +1,7 @@
 import { Router } from "express";
-import { AppError } from "../utils/AppError.js";
+import { spikeRiskController } from "../controllers/spikeRisk.controller.js";
 
 export const spikeRiskRouter = Router();
 
-spikeRiskRouter.get("/", (_req, res) => {
-  throw AppError.notImplemented(
-    "The spike-risk classifier has not been implemented yet (planned: Milestone 6).",
-  );
-});
+spikeRiskRouter.get("/feed", spikeRiskController.feed);
+spikeRiskRouter.get("/", spikeRiskController.latest);

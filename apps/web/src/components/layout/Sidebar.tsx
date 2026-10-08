@@ -2,6 +2,8 @@ import { NavLink } from "react-router-dom";
 
 const navItems = [
   { to: "/", label: "Overview", end: true },
+  { to: "/compare", label: "Compare markets" },
+  { to: "/price-intelligence", label: "Price intelligence" },
   { to: "/markets", label: "Markets" },
   { to: "/commodities", label: "Commodities" },
   { to: "/alerts", label: "Alerts" },
@@ -36,7 +38,6 @@ export function Sidebar() {
 
       <div className="mt-auto px-3 pt-6 text-xs text-ink-faint">
         <p>Development build</p>
-        <p className="font-mono">Milestone 1</p>
       </div>
     </aside>
   );

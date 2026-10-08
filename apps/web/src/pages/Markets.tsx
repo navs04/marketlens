@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "../components/ui/Card";
 import { useMarkets } from "../hooks/useReferenceData";
 
 export function Markets() {
   const markets = useMarkets();
+  const navigate = useNavigate();
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
@@ -24,7 +26,7 @@ export function Markets() {
         <div>
           <h1 className="font-display text-2xl font-semibold text-ink">Markets</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            Reference markets currently seeded in the database.
+            Every market with ingested price data. Click a row for details.
           </p>
         </div>
         <input
@@ -52,8 +54,12 @@ export function Markets() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((market) => (
-                <tr key={market.id} className="border-b border-line last:border-0">
+              {filtered.slice(0, 500).map((market) => (
+                <tr
+                  key={market.id}
+                  className="cursor-pointer border-b border-line last:border-0 hover:bg-paper-sunken"
+                  onClick={() => navigate(`/markets/${market.id}`)}
+                >
                   <td className="px-5 py-2.5 font-medium text-ink">{market.name}</td>
                   <td className="px-5 py-2.5 text-ink-muted">{market.district ?? "—"}</td>
                   <td className="px-5 py-2.5 text-ink-muted">{market.state}</td>
@@ -71,6 +77,11 @@ export function Markets() {
               )}
             </tbody>
           </table>
+        )}
+        {filtered.length > 500 && (
+          <p className="border-t border-line px-5 py-2.5 text-xs text-ink-muted">
+            Showing the first 500 of {filtered.length} matches - refine your filter to narrow further.
+          </p>
         )}
       </Card>
     </div>

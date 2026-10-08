@@ -17,6 +17,11 @@
     "prisma:generate": "npm run prisma:generate --workspace=apps/api",
     "prisma:migrate": "npm run prisma:migrate --workspace=apps/api",
     "prisma:studio": "npm run prisma:studio --workspace=apps/api",
-    "prisma:seed": "npm run prisma:seed --workspace=apps/api"
+    "prisma:seed": "npm run prisma:seed --workspace=apps/api",
+    "ingest": "npm run ingest --workspace=apps/api",
+    "ingest:csv": "npm run ingest:csv --workspace=apps/api --"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3"
   }
 }

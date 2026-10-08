@@ -14,6 +14,11 @@ interface MetricCardProps {
   /** When set, the card renders as an honest "not built yet" state instead
    *  of a fabricated number - e.g. "Milestone 2". Never mix this with `value`. */
   pendingMilestone?: string;
+  /** When set, the card renders an honest "not enough data" state - e.g.
+   *  "Needs 21+ days of history". Distinct from pendingMilestone: this is
+   *  for a built feature that simply has nothing to show for this
+   *  particular market/commodity pair yet. Never mix with `value`. */
+  unavailableReason?: string;
   helper?: ReactNode;
 }
 
@@ -31,6 +36,7 @@ export function MetricCard({
   trend,
   trendTone = "neutral",
   pendingMilestone,
+  unavailableReason,
   helper,
 }: MetricCardProps) {
   return (
@@ -42,6 +48,13 @@ export function MetricCard({
           <p className="mt-2 font-mono text-3xl font-medium text-ink-faint">— —</p>
           <div className="mt-2 flex items-center gap-2">
             <Badge tone="pending">Ships in {pendingMilestone}</Badge>
+          </div>
+        </>
+      ) : unavailableReason ? (
+        <>
+          <p className="mt-2 font-mono text-3xl font-medium text-ink-faint">—</p>
+          <div className="mt-2 flex items-center gap-2">
+            <Badge tone="pending">{unavailableReason}</Badge>
           </div>
         </>
       ) : (

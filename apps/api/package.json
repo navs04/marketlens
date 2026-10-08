@@ -11,7 +11,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "prisma:seed": "tsx prisma/seed.ts"
+    "prisma:seed": "tsx prisma/seed.ts",
+    "ingest": "tsx src/ingestion/cli.ts",
+    "ingest:csv": "tsx src/ingestion/cliCsv.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -19,6 +21,7 @@
   "dependencies": {
     "@prisma/client": "6.19.3",
     "cors": "2.8.6",
+    "csv-parse": "7.0.3",
     "dotenv": "17.4.2",
     "express": "5.2.1",
     "helmet": "8.3.0",

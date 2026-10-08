@@ -84,20 +84,31 @@ model PriceObservation {
   marketId     String
   commodityId  String
   date         DateTime @db.Date
-  price        Float // normalized to Commodity.unit
+  price        Float // = modalPrice; the standard "current price" signal for mandi data
   minPrice     Float?
   maxPrice     Float?
   modalPrice   Float?
-  qualityFlag  String? // e.g. "OUTLIER_SUSPECT" - set by ingestion cleaning, never silently dropped
-  sourceRecord String? // traceability id/ref back to the raw ingested record
+  variety      String   @default("") // e.g. "Nasik", "Local" - part of the natural key: the
+  // same market+commodity+date can legitimately carry several distinct
+  // variety-specific price rows in the real data.gov.in dataset. Default ""
+  // (not null) so the composite unique constraint below actually dedupes -
+  // Postgres treats NULL as distinct from NULL, which would silently defeat
+  // a unique constraint that included a nullable column.
+  grade        String? // e.g. "FAQ", "Local" - quality grade, not part of the key
+  qualityFlag  String? // e.g. "OUTLIER_SUSPECT" - reserved for Milestone 4's statistical
+  // anomaly detection; ingestion does not set this, it only accepts or
+  // rejects records
+  sourceRecord String? // natural-key string for traceability back to the raw ingested
+  // record, since this data.gov.in resource has no persistent row id
 
   createdAt DateTime @default(now())
 
   market    Market    @relation(fields: [marketId], references: [id], onDelete: Cascade)
   commodity Commodity @relation(fields: [commodityId], references: [id], onDelete: Cascade)
 
-  @@unique([marketId, commodityId, date])
+  @@unique([marketId, commodityId, date, variety])
   @@index([commodityId, date])
+  @@index([marketId, date])
 }
 
 model RawIngestionLog {
@@ -129,6 +140,11 @@ model ForecastResult {
   commodity   Commodity   @relation(fields: [commodityId], references: [id], onDelete: Cascade)
   explanation Explanation?
 
+  // One forecast per pair+target-date+horizon+model generation - lets the
+  // batch job be re-run safely (upsert) instead of accumulating duplicate
+  // rows, and lets a new model version coexist with an older one's
+  // predictions for comparison rather than overwriting them.
+  @@unique([marketId, commodityId, forecastDate, horizonDays, modelVersion])
   @@index([marketId, commodityId, forecastDate])
 }
 
@@ -147,7 +163,12 @@ model AnomalyFlag {
   commodity   Commodity   @relation(fields: [commodityId], references: [id], onDelete: Cascade)
   explanation Explanation?
 
+  // One score per pair+day+method - re-running the detector updates that
+  // day's score (e.g. after more history accumulates) instead of piling
+  // up duplicate rows for the same day.
+  @@unique([marketId, commodityId, date, method])
   @@index([marketId, commodityId, date])
+  @@index([isAnomaly, date])
 }
 
 model SpikeRiskScore {
@@ -163,7 +184,9 @@ model SpikeRiskScore {
   commodity   Commodity   @relation(fields: [commodityId], references: [id], onDelete: Cascade)
   explanation Explanation?
 
+  @@unique([marketId, commodityId, asOfDate, horizonDays, modelVersion])
   @@index([marketId, commodityId, asOfDate])
+  @@index([asOfDate])
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +206,30 @@ model Explanation {
   forecastResult ForecastResult? @relation(fields: [forecastResultId], references: [id], onDelete: Cascade)
   anomalyFlag    AnomalyFlag?    @relation(fields: [anomalyFlagId], references: [id], onDelete: Cascade)
   spikeRiskScore SpikeRiskScore? @relation(fields: [spikeRiskScoreId], references: [id], onDelete: Cascade)
+}
+
+/**
+ * One row per ML batch job run (forecast fit, anomaly scoring pass, or
+ * spike-risk scoring pass) for one market+commodity pair. Exists so
+ * evaluation metrics (MAE, RMSE, train/test sizes) and honest
+ * insufficient-data outcomes have somewhere to live, without bloating
+ * ForecastResult/AnomalyFlag with redundant per-row copies of the same
+ * per-run numbers. Not a full job queue - Milestone 5/6's batch scripts
+ * are run manually (see ml/README.md) and simply insert one of these.
+ */
+model ModelRun {
+  id           String    @id @default(cuid())
+  jobType      String // "FORECAST" | "ANOMALY" | "SPIKE_RISK"
+  marketId     String?
+  commodityId  String?
+  modelVersion String
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  status       String // "SUCCESS" | "SKIPPED_INSUFFICIENT_DATA" | "FAILED"
+  metrics      String? // JSON: { mae, rmse, trainSize, testSize, ... } - shape varies by jobType
+  notes        String?
+
+  @@index([jobType, marketId, commodityId])
 }
 
 // ---------------------------------------------------------------------------

@@ -7,10 +7,12 @@ import { forecastRouter } from "./forecast.route.js";
 import { anomalyRouter } from "./anomaly.route.js";
 import { spikeRiskRouter } from "./spikeRisk.route.js";
 import { explanationRouter } from "./explanation.route.js";
+import { overviewRouter } from "./overview.route.js";
 
 export const apiRouter = Router();
 
 apiRouter.use("/health", healthRouter);
+apiRouter.use("/overview", overviewRouter);
 apiRouter.use("/markets", marketRouter);
 apiRouter.use("/commodities", commodityRouter);
 apiRouter.use("/prices", priceRouter);

@@ -12,6 +12,12 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+
+  // Optional: powers AI-generated explanations (src/llm/). When unset, the
+  // explanation endpoint falls back to a deterministic, template-based
+  // explanation built from the same structured numbers - the app must
+  // work either way, per this project's own requirement.
+  ANTHROPIC_API_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
