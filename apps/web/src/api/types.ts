@@ -139,3 +139,49 @@ export interface MarketCommodityEntry {
   latestPrice: number;
   latestDate: string;
 }
+
+export type PriceRange = "30D" | "90D" | "1Y";
+
+export interface SeriesPoint {
+  date: string;
+  price: number;
+  minPrice: number | null;
+  maxPrice: number | null;
+}
+
+export interface PriceSeries {
+  range: PriceRange;
+  days: number;
+  points: SeriesPoint[];
+}
+
+export interface SparklinePoint {
+  date: string;
+  price: number;
+}
+
+export interface SparklineResponse {
+  days: number;
+  series: Record<string, SparklinePoint[]>;
+}
+
+export interface Mover {
+  commodity: { id: string; name: string; unit: string };
+  changePct: number;
+  markets: number;
+}
+
+export interface MoversResponse {
+  asOf: string | null;
+  windowDays: number;
+  minMarkets: number;
+  risers: Mover[];
+  fallers: Mover[];
+}
+
+export interface PageMeta {
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}

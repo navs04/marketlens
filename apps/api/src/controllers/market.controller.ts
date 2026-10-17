@@ -7,13 +7,27 @@ const listQuerySchema = z.object({
   state: z.string().min(1).optional(),
   district: z.string().min(1).optional(),
   search: z.string().min(1).optional(),
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().positive().max(100).default(25),
 });
 
 export const marketController = {
   async list(req: Request, res: Response) {
     const query = listQuerySchema.parse(req.query);
-    const markets = await marketService.list(query);
-    res.json({ data: markets });
+    const { items, total } = await marketService.list(query);
+    if (total === null) {
+      res.json({ data: items });
+      return;
+    }
+    res.json({
+      data: items,
+      meta: {
+        total,
+        page: query.page!,
+        pageSize: query.pageSize,
+        totalPages: Math.max(1, Math.ceil(total / query.pageSize)),
+      },
+    });
   },
 
   async listStates(_req: Request, res: Response) {

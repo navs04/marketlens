@@ -1,139 +1,194 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Card } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
-import { useSelection } from "../context/SelectionContext";
+import { Sparkline } from "../components/ui/Sparkline";
+import { StateMessage } from "../components/ui/StateMessage";
 import { useAnomalyFeed, useSpikeRiskFeed } from "../hooks/useFeeds";
+import { pairKey, useSparklines } from "../hooks/useSparklines";
+import { selectionPath } from "../lib/selectionLink";
+import { sparkFor, windowOf } from "../lib/sparkline";
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-IN", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
+
+const th = "px-4 py-2.5 font-medium sm:px-5";
+const td = "px-4 py-2.5 sm:px-5";
+
+function TableSkeleton() {
+  return (
+    <div className="flex flex-col gap-2 p-5" aria-busy="true" aria-label="Loading">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="h-8 animate-pulse rounded bg-paper-sunken" />
+      ))}
+    </div>
+  );
 }
 
 export function PriceIntelligence() {
   const navigate = useNavigate();
-  const { selectMarketId, selectCommodityId } = useSelection();
   const anomalies = useAnomalyFeed(50);
   const spikeRisk = useSpikeRiskFeed(50, 0.4);
 
-  function openInDashboard(marketId: string, commodityId: string) {
-    selectMarketId(marketId);
-    selectCommodityId(commodityId);
-    navigate("/");
-  }
+  const anomalyRows = anomalies.status === "ok" ? anomalies.data.data : [];
+  const riskRows = spikeRisk.status === "ok" ? spikeRisk.data.data : [];
+  const sparklines = useSparklines([
+    ...anomalyRows.map((a) => ({ marketId: a.market.id, commodityId: a.commodity.id })),
+    ...riskRows.map((s) => ({ marketId: s.market.id, commodityId: s.commodity.id })),
+  ]);
+  const sparkWindow = sparklines.status === "ok" ? windowOf(sparklines.data.data) : null;
+  const seriesFor = (marketId: string, commodityId: string) =>
+    sparkFor(sparklines.status === "ok" ? (sparklines.data.data.series[pairKey({ marketId, commodityId })] ?? []) : [], sparkWindow);
+  const domain: [number, number] | undefined = sparkWindow ? [sparkWindow.start, sparkWindow.end] : undefined;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       <div>
         <h1 className="font-display text-2xl font-semibold text-ink">Price intelligence</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          Unusual price movements and elevated spike risk across every tracked market.
-        </p>
+        <p className="mt-1 text-sm text-ink-muted">Unusual price movements and elevated spike risk across every tracked market.</p>
       </div>
 
-      <div>
-        <p className="mb-2 text-sm font-medium text-ink">Recent anomalies</p>
+      <section aria-labelledby="anomalies-heading">
+        <h2 id="anomalies-heading" className="mb-2 text-sm font-medium text-ink">
+          Recent anomalies
+        </h2>
         <Card className="overflow-hidden">
           {anomalies.status === "loading" || anomalies.status === "idle" ? (
-            <div className="flex flex-col gap-2 p-5">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="h-8 animate-pulse rounded bg-paper-sunken" />
-              ))}
-            </div>
+            <TableSkeleton />
           ) : anomalies.status === "error" ? (
-            <p className="p-5 text-sm text-risk">Could not load anomalies: {anomalies.message}</p>
-          ) : anomalies.data.data.length === 0 ? (
-            <p className="p-5 text-sm text-ink-muted">
-              No anomalies detected yet - this fills in once the anomaly-detection job has run
-              against enough price history.
-            </p>
+            <StateMessage kind="error" title="Couldn't load anomalies" action={{ label: "Try again", onClick: anomalies.retry }}>
+              The data service didn't respond. Check that the API is running, then try again.
+            </StateMessage>
+          ) : anomalyRows.length === 0 ? (
+            <StateMessage kind="empty" title="No anomalies detected yet">
+              This fills in after the anomaly-detection job has run on enough price history. See ml/README.md.
+            </StateMessage>
           ) : (
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-line bg-paper-sunken text-xs text-ink-muted">
-                  <th className="px-5 py-2.5 font-medium">Commodity</th>
-                  <th className="px-5 py-2.5 font-medium">Market</th>
-                  <th className="px-5 py-2.5 font-medium">Date</th>
-                  <th className="px-5 py-2.5 font-medium">Observed</th>
-                  <th className="px-5 py-2.5 font-medium">Expected</th>
-                  <th className="px-5 py-2.5 font-medium">Deviation</th>
-                </tr>
-              </thead>
-              <tbody>
-                {anomalies.data.data.map((a) => (
-                  <tr
-                    key={a.id}
-                    className="cursor-pointer border-b border-line last:border-0 hover:bg-paper-sunken"
-                    onClick={() => openInDashboard(a.market.id, a.commodity.id)}
-                  >
-                    <td className="px-5 py-2.5 font-medium text-ink">{a.commodity.name}</td>
-                    <td className="px-5 py-2.5 text-ink-muted">
-                      {a.market.name}, {a.market.state}
-                    </td>
-                    <td className="px-5 py-2.5 font-mono text-xs text-ink-muted">{formatDate(a.date)}</td>
-                    <td className="px-5 py-2.5 font-mono text-ink">₹{Math.round(a.observedPrice)}</td>
-                    <td className="px-5 py-2.5 font-mono text-ink-muted">₹{Math.round(a.expectedPrice)}</td>
-                    <td className="px-5 py-2.5">
-                      <Badge tone={a.deviationPct > 0 ? "risk" : "stable"}>
-                        {a.deviationPct > 0 ? "+" : ""}
-                        {Math.round(a.deviationPct)}%
-                      </Badge>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-line bg-paper-sunken text-xs text-ink-muted">
+                    <th className={th}>Commodity</th>
+                    <th className={`${th} hidden sm:table-cell`}>Market</th>
+                    <th className={`${th} hidden md:table-cell`}>Date</th>
+                    <th className={`${th} num`}>Observed</th>
+                    <th className={`${th} num hidden md:table-cell`}>Expected</th>
+                    <th className={`${th} num`}>Deviation</th>
+                    <th className={`${th} num hidden lg:table-cell`}>30-day trend</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {anomalyRows.map((a) => (
+                    <tr
+                      key={a.id}
+                      className="cursor-pointer border-b border-line transition-colors last:border-0 hover:bg-paper-sunken"
+                      onClick={() => navigate(selectionPath("/", { marketId: a.market.id, commodityId: a.commodity.id }))}
+                    >
+                      <td className={td}>
+                        <Link
+                          to={selectionPath("/", { marketId: a.market.id, commodityId: a.commodity.id })}
+                          className="font-medium text-ink hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {a.commodity.name}
+                        </Link>
+                        <p className="text-xs text-ink-muted sm:hidden">
+                          {a.market.name}, {a.market.state}
+                        </p>
+                      </td>
+                      <td className={`${td} hidden text-ink-muted sm:table-cell`}>
+                        {a.market.name}, {a.market.state}
+                      </td>
+                      <td className={`${td} hidden font-mono text-xs text-ink-muted md:table-cell`}>{formatDate(a.date)}</td>
+                      <td className={`${td} num font-mono text-ink`}>₹{Math.round(a.observedPrice).toLocaleString("en-IN")}</td>
+                      <td className={`${td} num hidden font-mono text-ink-muted md:table-cell`}>
+                        ₹{Math.round(a.expectedPrice).toLocaleString("en-IN")}
+                      </td>
+                      <td className={`${td} num`}>
+                        <Badge tone={a.deviationPct > 0 ? "risk" : "stable"}>
+                          {a.deviationPct > 0 ? "+" : ""}
+                          {Math.round(a.deviationPct)}%
+                        </Badge>
+                      </td>
+                      <td className={`${td} hidden lg:table-cell`}>
+                        <div className="flex justify-end">
+                          <Sparkline {...seriesFor(a.market.id, a.commodity.id)} domain={domain} label={`${a.commodity.name} 30-day price trend`} />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
-      </div>
+      </section>
 
-      <div>
-        <p className="mb-2 text-sm font-medium text-ink">Elevated spike risk</p>
+      <section aria-labelledby="risk-heading">
+        <h2 id="risk-heading" className="mb-2 text-sm font-medium text-ink">
+          Elevated spike risk
+        </h2>
         <Card className="overflow-hidden">
           {spikeRisk.status === "loading" || spikeRisk.status === "idle" ? (
-            <div className="flex flex-col gap-2 p-5">
-              {[0, 1].map((i) => (
-                <div key={i} className="h-8 animate-pulse rounded bg-paper-sunken" />
-              ))}
-            </div>
+            <TableSkeleton />
           ) : spikeRisk.status === "error" ? (
-            <p className="p-5 text-sm text-risk">Could not load spike risk: {spikeRisk.message}</p>
-          ) : spikeRisk.data.data.length === 0 ? (
-            <p className="p-5 text-sm text-ink-muted">
-              No market/commodity pairs currently show elevated spike risk.
-            </p>
+            <StateMessage kind="error" title="Couldn't load spike risk" action={{ label: "Try again", onClick: spikeRisk.retry }}>
+              The data service didn't respond. Check that the API is running, then try again.
+            </StateMessage>
+          ) : riskRows.length === 0 ? (
+            <StateMessage kind="empty" title="No pairs currently show elevated risk">
+              Pairs appear here when their heuristic spike-risk score reaches 40% or more.
+            </StateMessage>
           ) : (
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-line bg-paper-sunken text-xs text-ink-muted">
-                  <th className="px-5 py-2.5 font-medium">Commodity</th>
-                  <th className="px-5 py-2.5 font-medium">Market</th>
-                  <th className="px-5 py-2.5 font-medium">As of</th>
-                  <th className="px-5 py-2.5 font-medium">Risk (next {spikeRisk.data.data[0]?.horizonDays ?? 7}d)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {spikeRisk.data.data.map((s) => (
-                  <tr
-                    key={`${s.market.id}-${s.commodity.id}`}
-                    className="cursor-pointer border-b border-line last:border-0 hover:bg-paper-sunken"
-                    onClick={() => openInDashboard(s.market.id, s.commodity.id)}
-                  >
-                    <td className="px-5 py-2.5 font-medium text-ink">{s.commodity.name}</td>
-                    <td className="px-5 py-2.5 text-ink-muted">
-                      {s.market.name}, {s.market.state}
-                    </td>
-                    <td className="px-5 py-2.5 font-mono text-xs text-ink-muted">{formatDate(s.asOfDate)}</td>
-                    <td className="px-5 py-2.5">
-                      <Badge tone={s.riskProbability >= 0.6 ? "risk" : "neutral"}>
-                        {Math.round(s.riskProbability * 100)}%
-                      </Badge>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-line bg-paper-sunken text-xs text-ink-muted">
+                    <th className={th}>Commodity</th>
+                    <th className={`${th} hidden sm:table-cell`}>Market</th>
+                    <th className={`${th} hidden md:table-cell`}>As of</th>
+                    <th className={`${th} num`}>Risk (next {riskRows[0]?.horizonDays ?? 7}d)</th>
+                    <th className={`${th} num hidden lg:table-cell`}>30-day trend</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {riskRows.map((s) => (
+                    <tr
+                      key={`${s.market.id}-${s.commodity.id}`}
+                      className="cursor-pointer border-b border-line transition-colors last:border-0 hover:bg-paper-sunken"
+                      onClick={() => navigate(selectionPath("/", { marketId: s.market.id, commodityId: s.commodity.id }))}
+                    >
+                      <td className={td}>
+                        <Link
+                          to={selectionPath("/", { marketId: s.market.id, commodityId: s.commodity.id })}
+                          className="font-medium text-ink hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {s.commodity.name}
+                        </Link>
+                        <p className="text-xs text-ink-muted sm:hidden">
+                          {s.market.name}, {s.market.state}
+                        </p>
+                      </td>
+                      <td className={`${td} hidden text-ink-muted sm:table-cell`}>
+                        {s.market.name}, {s.market.state}
+                      </td>
+                      <td className={`${td} hidden font-mono text-xs text-ink-muted md:table-cell`}>{formatDate(s.asOfDate)}</td>
+                      <td className={`${td} num`}>
+                        <Badge tone={s.riskProbability >= 0.6 ? "risk" : "neutral"}>{Math.round(s.riskProbability * 100)}%</Badge>
+                      </td>
+                      <td className={`${td} hidden lg:table-cell`}>
+                        <div className="flex justify-end">
+                          <Sparkline {...seriesFor(s.market.id, s.commodity.id)} domain={domain} label={`${s.commodity.name} 30-day price trend`} />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
-      </div>
+      </section>
     </div>
   );
 }

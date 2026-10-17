@@ -2,15 +2,43 @@ import { prisma } from "../lib/prisma.js";
 import { Prisma } from "@prisma/client";
 
 export const marketService = {
-  async list({ state, district, search }: { state?: string; district?: string; search?: string } = {}) {
-    return prisma.market.findMany({
-      where: {
-        ...(state ? { state } : {}),
-        ...(district ? { district } : {}),
-        ...(search ? { name: { contains: search, mode: "insensitive" } } : {}),
-      },
-      orderBy: [{ state: "asc" }, { name: "asc" }],
-    });
+  /**
+   * Without `page`, returns every matching market (the selectors need the
+   * full list). With `page`, returns one page plus the total, so the
+   * Markets table never loads thousands of rows into the browser.
+   * `search` matches name, state, or district, case-insensitively.
+   */
+  async list({
+    state,
+    district,
+    search,
+    page,
+    pageSize = 25,
+  }: { state?: string; district?: string; search?: string; page?: number; pageSize?: number } = {}) {
+    const where: Prisma.MarketWhereInput = {
+      ...(state ? { state } : {}),
+      ...(district ? { district } : {}),
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: "insensitive" } },
+              { state: { contains: search, mode: "insensitive" } },
+              { district: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    };
+    const orderBy: Prisma.MarketOrderByWithRelationInput[] = [{ state: "asc" }, { name: "asc" }];
+
+    if (page === undefined) {
+      return { items: await prisma.market.findMany({ where, orderBy }), total: null as number | null };
+    }
+
+    const [items, total] = await Promise.all([
+      prisma.market.findMany({ where, orderBy, skip: (page - 1) * pageSize, take: pageSize }),
+      prisma.market.count({ where }),
+    ]);
+    return { items, total };
   },
 
   async getById(id: string) {

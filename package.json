@@ -19,7 +19,9 @@
     "prisma:studio": "npm run prisma:studio --workspace=apps/api",
     "prisma:seed": "npm run prisma:seed --workspace=apps/api",
     "ingest": "npm run ingest --workspace=apps/api",
-    "ingest:csv": "npm run ingest:csv --workspace=apps/api --"
+    "ingest:csv": "npm run ingest:csv --workspace=apps/api --",
+    "prisma:deploy": "npm run prisma:deploy --workspace=apps/api",
+    "build:api:prod": "npm run build:prod --workspace=apps/api"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3"

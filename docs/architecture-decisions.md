@@ -280,3 +280,71 @@ same-batch-conflict rejection, tested first with a 3-row minimal reproduction (2
 grade, 1 distinct), then at scale with a 38,400-row synthetic file where half the rows are
 deliberate grade-only collisions throughout - correctly collapsed to 19,200 distinct rows,
 zero crashes, completed in under a second against the stub.
+
+
+---
+
+# UI/UX refinement pass
+
+A polish pass on the finished product, not a rewrite. Everything below is driven by real data
+already in the database; nothing is mocked.
+
+## Bugs found in the existing code while checking what the new UI would be fed
+These predate the pass. Fixing them was the foundation for everything else.
+- **The price chart showed the oldest rows, not the latest.** `/prices?limit=90` sorted by date
+  ascending and took the first 90 rows, so with a year of data the chart showed August 2024 while
+  the forecast started August 2025. Rows were also per variety, so one date plotted several
+  points. Replaced by `/prices/series`: one averaged price per day, anchored to the pair's own
+  latest date, with real range queries. The anomaly request now asks for the same date window.
+- **Hero numbers disagreed with the chart.** `summary()` took one arbitrary variety's price as
+  "current" but averaged all variety rows for the baseline, and its "based on N days" actually
+  counted rows. It now uses the same daily series as the chart. The baseline excludes the latest
+  day, matching how the anomaly detector forms its expectation.
+- **The top bar said "As of <today>"** though the data ends 14 Aug 2025, implying freshness the
+  data does not have. It now says "Data through <latest data date>".
+- **Two color tokens failed WCAG AA contrast** (`ink-faint` at 2.8:1, the green status badge at
+  4.1:1). Both darkened at the token level.
+
+## Biggest movers: how the number is defined
+For each commodity, the median percentage change between the most recent 7 days of data and the
+7 days before, taken only across markets that reported in both windows. Matching markets means a
+commodity cannot appear to move just because a different set of markets happened to report.
+Median, not mean, so one wild market cannot dominate. Commodities with fewer than 5 matched
+markets are excluded rather than ranked on thin evidence. Windows are anchored to the latest date
+in the data, not today. Cached for 10 minutes server-side.
+
+## Sparklines are drawn on a time scale, and a "30-day change" needs 30 days of data
+The first version spaced points by index, so a market with 5 days of data was stretched across
+the full width and its "30-day change" came from those 5 days. Sparklines now place points by
+real date within a shared window, so sparse data visibly covers only part of the width, and the
+change figure is shown only when the series reaches both ends of the window. Found by an
+integration test, not by inspection.
+
+## State in the URL
+Market, commodity, chart range, Compare's state filter, and the Markets search and page are URL
+query parameters. The URL only records explicit choices; defaults are not written to it.
+Navigation links carry the current market and commodity.
+
+## Pagination
+`/markets` takes optional `page`/`pageSize` and returns `meta` (total, totalPages). Without
+`page` it returns the full list unchanged, because the selectors need it.
+
+## Intentionally not done
+- **Z-scores in anomaly tooltips**: not stored by the ML job. The tooltip shows only stored
+  fields (price, expected price, deviation).
+- **Sparklines in the Markets table**: a market is not a single price series.
+- **Sparklines on movers**: a commodity-level daily series changes with the set of reporting
+  markets, which would draw trends that are artifacts of coverage.
+- **Replacing the selector dropdowns with comboboxes**: the command palette covers fast
+  lookup; a combobox is a reasonable follow-up.
+
+## How this was verified
+No browser was available, so verification was layered. Chart data shaping was unit-tested on edge
+cases (stale forecasts, null bounds, gaps). The new SQL was run against a real PostgreSQL 18
+(installed via an npm-packaged binary) with a deterministic fixture whose correct answers were
+known in advance. The real Python ML pipeline was run against that database, including a
+re-run to confirm it is idempotent. The real `<App/>` was then driven in jsdom against the real
+API: deep links, back button, pagination, debounced search, the command palette, the mobile
+drawer, and hovering an anomaly to read its tooltip. Several of those checks failed first and
+found real problems (above). What this cannot show is visual polish: spacing, alignment, and how
+it feels are still worth a look in a real browser.

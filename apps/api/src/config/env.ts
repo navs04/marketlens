@@ -18,6 +18,12 @@ const envSchema = z.object({
   // explanation built from the same structured numbers - the app must
   // work either way, per this project's own requirement.
   ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().min(1).default("claude-haiku-5-5"),
+  // Safety valve for a public deployment: after this many LLM calls in a UTC
+  // day the explanation endpoint serves the deterministic fallback instead.
+  // Counted in memory, so it resets on restart - it guards against runaway
+  // cost, it is not billing. Also set a spend limit in the Anthropic console.
+  LLM_DAILY_CALL_LIMIT: z.coerce.number().int().min(0).default(200),
 });
 
 const parsed = envSchema.safeParse(process.env);

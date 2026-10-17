@@ -1,91 +1,105 @@
+import { useSearchParams } from "react-router-dom";
 import { Card } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { MetricCard } from "../components/ui/MetricCard";
+import { StateMessage } from "../components/ui/StateMessage";
 import { PriceTrendChart } from "../components/charts/PriceTrendChart";
+import { MoversPanel } from "../components/dashboard/MoversPanel";
 import { useSelection } from "../context/SelectionContext";
 import { useOverview } from "../hooks/useOverview";
 import {
   useAnomalyHistory,
   useExplanation,
   useForecast,
-  usePriceHistory,
+  usePriceSeries,
   usePriceSummary,
   useSpikeRisk,
 } from "../hooks/usePriceIntelligence";
+import type { PriceRange } from "../api/types";
+
+const VALID_RANGES: PriceRange[] = ["30D", "90D", "1Y"];
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return new Date(iso).toLocaleDateString("en-IN", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
 }
 
-function OverviewRow() {
+/** One bordered strip with hairline dividers instead of four separate cards. */
+function OverviewStrip() {
   const overview = useOverview();
 
   if (overview.status === "loading" || overview.status === "idle") {
-    return (
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-16 animate-pulse rounded-md bg-paper-sunken" />
-        ))}
-      </div>
-    );
+    return <div className="h-[68px] animate-pulse rounded-md bg-paper-sunken" aria-busy="true" aria-label="Loading overview" />;
   }
 
   if (overview.status === "error") {
     return (
-      <Card className="p-4 text-sm text-risk">Could not load overview stats: {overview.message}</Card>
+      <Card>
+        <StateMessage compact kind="error" title="Couldn't load the overview" action={{ label: "Try again", onClick: overview.retry }} />
+      </Card>
     );
   }
 
   const { data } = overview.data;
+  const cells: Array<{ label: string; value: string }> = [
+    { label: "Commodities tracked", value: data.commoditiesTracked.toLocaleString("en-IN") },
+    { label: "Markets tracked", value: data.marketsTracked.toLocaleString("en-IN") },
+    { label: "Latest data", value: formatDate(data.latestDataDate) },
+    { label: "Anomalies detected", value: data.anomaliesDetected.toLocaleString("en-IN") },
+  ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-      <Card className="p-4">
-        <p className="text-xs text-ink-muted">Commodities tracked</p>
-        <p className="font-mono text-xl font-medium text-ink">{data.commoditiesTracked}</p>
-      </Card>
-      <Card className="p-4">
-        <p className="text-xs text-ink-muted">Markets tracked</p>
-        <p className="font-mono text-xl font-medium text-ink">{data.marketsTracked}</p>
-      </Card>
-      <Card className="p-4">
-        <p className="text-xs text-ink-muted">Latest data</p>
-        <p className="font-mono text-xl font-medium text-ink">{formatDate(data.latestDataDate)}</p>
-      </Card>
-      <Card className="p-4">
-        <p className="text-xs text-ink-muted">Anomalies detected</p>
-        <p className="font-mono text-xl font-medium text-ink">{data.anomaliesDetected}</p>
-      </Card>
-    </div>
+    <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-line bg-line md:grid-cols-4">
+      {cells.map((cell) => (
+        <div key={cell.label} className="bg-paper-raised px-4 py-3">
+          <dt className="text-xs text-ink-muted">{cell.label}</dt>
+          <dd className="mt-0.5 font-mono text-lg font-medium text-ink">{cell.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
 export function Dashboard() {
   const { selectedMarket, selectedCommodity, markets, commodities } = useSelection();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const rangeParam = searchParams.get("range") as PriceRange | null;
+  const range: PriceRange = rangeParam && VALID_RANGES.includes(rangeParam) ? rangeParam : "90D";
+  const setRange = (next: PriceRange) =>
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      params.set("range", next);
+      return params;
+    });
+
   const pair = { marketId: selectedMarket?.id ?? null, commodityId: selectedCommodity?.id ?? null };
 
   const summary = usePriceSummary(pair);
-  const history = usePriceHistory(pair, 90);
+  const series = usePriceSeries(pair, range);
+  const seriesPoints = series.status === "ok" ? series.data.data.points : [];
+  const firstSeriesDate = seriesPoints[0]?.date.slice(0, 10) ?? null;
+  const anomalies = useAnomalyHistory(pair, firstSeriesDate);
   const forecast = useForecast(pair);
-  const anomalies = useAnomalyHistory(pair, 90);
   const spikeRisk = useSpikeRisk(pair);
   const explanation = useExplanation(pair);
 
   const stillLoadingSelection = markets.status === "loading" || commodities.status === "loading";
   const nothingSelected = !selectedMarket || !selectedCommodity;
+  const subject = nothingSelected ? "" : `${selectedCommodity.name}, ${selectedMarket.name}, ${selectedMarket.state}`;
+
+  const chartStatus =
+    series.status === "error" ? "error" : series.status === "ok" ? "ready" : "loading";
 
   return (
     <div className="flex flex-col gap-6">
-      <OverviewRow />
+      <OverviewStrip />
 
       <div>
         {stillLoadingSelection ? (
           <div className="h-8 w-72 animate-pulse rounded bg-paper-sunken" />
         ) : nothingSelected ? (
-          <h1 className="font-display text-2xl font-semibold text-ink">
-            Select a commodity and market to begin
-          </h1>
+          <h1 className="font-display text-2xl font-semibold text-ink">Select a commodity and market to begin</h1>
         ) : (
           <h1 className="font-display text-2xl font-semibold text-ink">
             {selectedCommodity.name}
@@ -101,8 +115,8 @@ export function Dashboard() {
           <MetricCard
             label="Current price"
             emphasis
-            value={`₹${summary.data.data.currentPrice}`}
-            unit={`as of ${formatDate(summary.data.data.currentDate)}`}
+            value={`₹${Math.round(summary.data.data.currentPrice).toLocaleString("en-IN")}`}
+            unit={`per quintal, ${formatDate(summary.data.data.currentDate)}`}
           />
         ) : summary.status === "error" && summary.notFound ? (
           <MetricCard label="Current price" emphasis unavailableReason="No data for this pair yet" />
@@ -125,7 +139,7 @@ export function Dashboard() {
                   ? "risk"
                   : "stable"
             }
-            helper={`Baseline ₹${summary.data.data.baselineAverage} - based on ${summary.data.data.dataPointsInWindow} day${summary.data.data.dataPointsInWindow === 1 ? "" : "s"}`}
+            helper={`Baseline ₹${Math.round(summary.data.data.baselineAverage).toLocaleString("en-IN")}, based on ${summary.data.data.dataPointsInWindow} day${summary.data.data.dataPointsInWindow === 1 ? "" : "s"}`}
           />
         ) : summary.status === "error" && summary.notFound ? (
           <MetricCard label="Vs. historical average" unavailableReason="No data for this pair yet" />
@@ -147,7 +161,7 @@ export function Dashboard() {
                   ? "neutral"
                   : "stable"
             }
-            helper="Rule-based heuristic, not a trained classifier - see docs"
+            helper="Rule-based heuristic, not a trained classifier"
           />
         ) : spikeRisk.status === "ok" || (spikeRisk.status === "error" && spikeRisk.notFound) ? (
           <MetricCard label="Spike risk" unavailableReason="Needs more price history" />
@@ -160,67 +174,80 @@ export function Dashboard() {
       </div>
 
       <PriceTrendChart
-        history={history.status === "ok" ? history.data.data : []}
+        status={chartStatus}
+        stale={series.status === "ok" && Boolean(series.stale)}
+        onRetry={series.status === "error" ? series.retry : undefined}
+        series={seriesPoints}
         forecasts={forecast.status === "ok" ? forecast.data.data.forecasts : []}
         anomalies={anomalies.status === "ok" ? anomalies.data.data : []}
+        range={range}
+        onRangeChange={setRange}
+        subject={subject}
       />
 
-      {/* Forecast evaluation panel */}
-      {forecast.status === "ok" && forecast.data.data.evaluation?.metrics && (
-        <Card className="p-5">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-ink-muted">Forecast model evaluation</p>
-            <Badge tone="neutral">{forecast.data.data.evaluation.metrics.winner ?? forecast.data.data.evaluation.modelVersion}</Badge>
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div>
-              <p className="text-xs text-ink-muted">MAE</p>
-              <p className="font-mono text-sm text-ink">₹{forecast.data.data.evaluation.metrics.mae}</p>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="flex min-w-0 flex-col gap-6">
+          {/* AI interpretation: styled as an analyst note, not a chat bubble */}
+          <Card className="border-l-2 border-l-ink p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-xs font-medium text-ink-muted">AI interpretation</h2>
+              {explanation.status === "ok" && (
+                <Badge tone={explanation.data.data.source === "llm" ? "neutral" : "pending"}>
+                  {explanation.data.data.source === "llm" ? "AI-generated" : "Deterministic summary"}
+                </Badge>
+              )}
             </div>
-            <div>
-              <p className="text-xs text-ink-muted">RMSE</p>
-              <p className="font-mono text-sm text-ink">₹{forecast.data.data.evaluation.metrics.rmse}</p>
-            </div>
-            <div>
-              <p className="text-xs text-ink-muted">Train size</p>
-              <p className="font-mono text-sm text-ink">{forecast.data.data.evaluation.metrics.trainSize} days</p>
-            </div>
-            <div>
-              <p className="text-xs text-ink-muted">Test size</p>
-              <p className="font-mono text-sm text-ink">{forecast.data.data.evaluation.metrics.testSize} days</p>
-            </div>
-          </div>
-          <p className="mt-3 text-xs text-ink-muted">
-            Evaluated on a held-out, time-ordered split - predictions are estimates, not guarantees.
-          </p>
-        </Card>
-      )}
+            {explanation.status === "ok" ? (
+              <p className="mt-2 text-sm leading-relaxed text-ink">{explanation.data.data.text}</p>
+            ) : explanation.status === "error" && explanation.notFound ? (
+              <p className="mt-2 text-sm text-ink-muted">
+                Not enough price data for this market and commodity yet to generate an explanation.
+              </p>
+            ) : explanation.status === "error" ? (
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+                <span className="text-risk">Couldn't generate an explanation.</span>
+                <button type="button" onClick={explanation.retry} className="text-ink underline underline-offset-2 hover:no-underline">
+                  Try again
+                </button>
+              </div>
+            ) : (
+              <div className="mt-2 flex flex-col gap-2" aria-busy="true" aria-label="Loading explanation">
+                <div className="h-3 w-full animate-pulse rounded bg-paper-sunken" />
+                <div className="h-3 w-5/6 animate-pulse rounded bg-paper-sunken" />
+              </div>
+            )}
+          </Card>
 
-      {/* AI interpretation */}
-      <Card className="border-l-2 border-l-ink p-5">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-medium text-ink-muted">AI interpretation</p>
-          {explanation.status === "ok" && (
-            <Badge tone={explanation.data.data.source === "llm" ? "neutral" : "pending"}>
-              {explanation.data.data.source === "llm" ? "AI-generated" : "Deterministic summary"}
-            </Badge>
+          {forecast.status === "ok" && forecast.data.data.evaluation?.metrics && (
+            <section aria-labelledby="eval-heading">
+              <div className="flex items-center justify-between gap-3">
+                <h2 id="eval-heading" className="text-sm font-medium text-ink">
+                  Forecast model evaluation
+                </h2>
+                <Badge tone="neutral">{forecast.data.data.evaluation.metrics.winner ?? forecast.data.data.evaluation.modelVersion}</Badge>
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-line pt-3 sm:grid-cols-4">
+                {[
+                  { label: "MAE", value: `₹${(forecast.data.data.evaluation.metrics.mae ?? 0).toFixed(1)}` },
+                  { label: "RMSE", value: `₹${(forecast.data.data.evaluation.metrics.rmse ?? 0).toFixed(1)}` },
+                  { label: "Train size", value: `${forecast.data.data.evaluation.metrics.trainSize} days` },
+                  { label: "Test size", value: `${forecast.data.data.evaluation.metrics.testSize} days` },
+                ].map((item) => (
+                  <div key={item.label}>
+                    <dt className="text-xs text-ink-muted">{item.label}</dt>
+                    <dd className="font-mono text-sm text-ink">{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-3 text-xs text-ink-muted">
+                Evaluated on a held-out, time-ordered split. Forecasts are estimates, not guarantees.
+              </p>
+            </section>
           )}
         </div>
-        {explanation.status === "ok" ? (
-          <p className="mt-2 text-sm text-ink">{explanation.data.data.text}</p>
-        ) : explanation.status === "error" && explanation.notFound ? (
-          <p className="mt-2 text-sm text-ink-muted">
-            Not enough price data for this market and commodity yet to generate an explanation.
-          </p>
-        ) : explanation.status === "error" ? (
-          <p className="mt-2 text-sm text-risk">Could not generate an explanation: {explanation.message}</p>
-        ) : (
-          <div className="mt-2 flex flex-col gap-2">
-            <div className="h-3 w-full animate-pulse rounded bg-paper-sunken" />
-            <div className="h-3 w-5/6 animate-pulse rounded bg-paper-sunken" />
-          </div>
-        )}
-      </Card>
+
+        <MoversPanel />
+      </div>
     </div>
   );
 }

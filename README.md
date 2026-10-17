@@ -7,22 +7,29 @@ ML models produce every number (forecasts, anomaly scores, risk scores). An LLM 
 ## What it does
 
 - **Real data pipeline**: ingests mandi prices from the data.gov.in API, or from a downloaded CSV when the API is unreachable. Validates, normalizes, deduplicates, and rejects bad records with a logged reason.
-- **Analytics API**: current price, historical baseline, deviation, trend, and cross-market comparison.
+- **Analytics API**: daily price series, current price, historical baseline, deviation, trend, cross-market comparison, sparklines, and biggest movers.
 - **ML pipeline (Python)**: rolling z-score anomaly detection, forecasting (naive vs. linear trend, evaluated on a time-ordered held-out split with MAE/RMSE), and a transparent spike-risk score.
 - **AI explanations**: structured numbers in, plain-language text out, with a deterministic fallback.
-- **Dashboard**: overview stats, per-commodity/market price chart with forecast and anomaly markers, market comparison, a price-intelligence feed, and market detail pages.
+- **Dashboard**:
+  - overview stats and a per-commodity/market price chart (30D / 90D / 1Y)
+  - the forecast's uncertainty band, a min/max range band, and anomaly markers sized by deviation
+  - biggest movers
+  - market comparison with sparklines
+  - a price-intelligence feed
+  - market detail pages
+- **Navigation**: the selected market, commodity, and chart range live in the URL, so refresh, back/forward, and shared links work. `Ctrl+K` opens a command palette to jump to any market, commodity, or page. The sidebar collapses into a drawer on small screens.
 
 ## Stack
 
-React, TypeScript, Vite, Tailwind CSS 4, Recharts / Express 5, TypeScript, Prisma 6 / PostgreSQL / Python (pandas, scikit-learn, SQLAlchemy)
+React, TypeScript, Vite, Tailwind CSS 4, Recharts / Express 5, TypeScript, Prisma 6, PostgreSQL / Python (pandas, scikit-learn, SQLAlchemy)
 
 ## Prerequisites
 
 - Node.js 22.12+ or 24.x
 - Python 3.11+
 - PostgreSQL 16 (Docker, or a native install)
-- Optional: a data.gov.in API key, if you want live ingestion
-- Optional: an Anthropic API key, if you want AI-written explanations
+- Optional: a data.gov.in API key, for live ingestion
+- Optional: an Anthropic API key, for AI-written explanations
 
 ## Setup
 
@@ -63,11 +70,11 @@ Notes:
 - Both paths use the same validation and normalization and write through the same upsert logic, so they are safe to re-run.
 - Large files (1M+ rows) import in batches with progress output. Expect a minute or two.
 - Rejected rows are logged to `apps/api/logs/` with a reason.
-- Check how much history you actually have before expecting forecasts. The live data.gov.in resource is a current-day snapshot and does not retain history, so a single-day file can't support forecasting.
+- Check how much history you have before expecting forecasts. The live data.gov.in resource is a current-day snapshot and does not retain history, so a single-day file can't support forecasting.
 
 ## Running the ML pipeline
 
-Run this after price data is loaded:
+Run this after price data is loaded, and again whenever you load new data:
 
 ```bash
 cd ml
@@ -77,7 +84,7 @@ pip install -r requirements.txt
 python run_all.py
 ```
 
-Run it from `ml/`. It reads `DATABASE_URL` from `apps/api/.env`. See `ml/README.md` for what each job does and its minimum history requirements. Pairs with too little history are skipped and logged, not forced through a model. Safe to re-run any time, and you should re-run it after loading new data.
+Run it from `ml/`. It reads `DATABASE_URL` from `apps/api/.env`. See `ml/README.md` for what each job does and its minimum history requirements. Pairs with too little history, or with no price variation, are skipped and logged, not forced through a model. Safe to re-run.
 
 ## Running the app
 
@@ -105,12 +112,15 @@ All routes are under `/api/v1`.
 | Route | Purpose |
 |---|---|
 | `GET /health` | Liveness and database check |
-| `GET /overview` | Dashboard summary counts |
-| `GET /markets`, `/markets/states`, `/markets/:id`, `/markets/:id/commodities` | Markets, with state/district/search filters |
+| `GET /overview` | Dashboard summary counts and the latest data date |
+| `GET /markets`, `/markets/states`, `/markets/:id`, `/markets/:id/commodities` | Markets. Add `page` / `pageSize` for server-side pagination; `search` matches name, state, or district |
 | `GET /commodities`, `/commodities/:id` | Commodities |
-| `GET /prices` | Historical prices (filter by market, commodity, state, district, date range) |
-| `GET /prices/latest`, `/prices/summary`, `/prices/compare` | Latest price, baseline analytics, cross-market comparison |
-| `GET /forecasts` | Stored forecasts plus evaluation metrics (MAE/RMSE) |
+| `GET /prices` | Raw price rows (filter by market, commodity, state, district, date range) |
+| `GET /prices/series` | One averaged price per day for a market and commodity, over `range=30D\|90D\|1Y`, anchored to that pair's latest date |
+| `GET /prices/latest`, `/prices/summary`, `/prices/compare` | Latest price, baseline analytics (same daily series as the chart), cross-market comparison |
+| `GET /prices/sparklines` | Recent daily series for many `marketId:commodityId` pairs in one query |
+| `GET /prices/movers` | Biggest commodity-level price moves (definition in `docs/architecture-decisions.md`) |
+| `GET /forecasts` | Stored forecasts with lower/upper bounds, plus evaluation metrics (MAE/RMSE) |
 | `GET /anomalies`, `/anomalies/feed` | Per-pair anomaly scores and a cross-market feed |
 | `GET /spike-risk`, `/spike-risk/feed` | Per-pair and highest-risk spike scores |
 | `GET /explanation` | Plain-language explanation (LLM or deterministic fallback) |
@@ -128,6 +138,10 @@ infra/                  Local Postgres (docker-compose)
 docs/                   Architecture decision notes
 ```
 
+## Deployment
+
+See `docs/DEPLOYMENT.md` for deploying to Neon (Postgres) + Render (API and static web) with the included `render.yaml`, including how to check that your data fits a free database.
+
 ## Design decisions worth knowing
 
 Full reasoning is in `docs/architecture-decisions.md`. The short version:
@@ -136,12 +150,15 @@ Full reasoning is in `docs/architecture-decisions.md`. The short version:
 - **TypeScript is pinned to 6.0.3**, because the surrounding tooling doesn't support 7.x yet.
 - **Spike risk is a documented, rule-based heuristic**, not a trained classifier. There is no labeled historical spike data to train one honestly.
 - **Forecasting compares two simple baselines** and uses whichever wins on held-out data. A more complex model is only justified once the data volume supports it.
-- **Prices are stored as per-quintal modal prices.** The source publishes no unit field, so "per quintal" is an explicit, documented assumption.
+- **Prices are per-quintal modal prices.** The source publishes no unit field, so "per quintal" is an explicit, documented assumption.
+- **Charts show a daily average across varieties**, matching what the ML jobs score, so anomaly dates and forecasts line up with what is plotted.
+- **The UI shows only stored values.** Forecast bands come from stored bounds, anomaly tooltips from stored scores, and nothing is generated client-side. If a value isn't stored (z-scores, for example), it isn't shown.
 
 ## Known limitations
 
-- Responsive design is partial: content grids reflow, but the sidebar does not collapse into a mobile drawer.
-- The Markets table renders at most 500 rows rather than using real pagination.
+- The tooltip does not show z-scores: the ML job computes them but does not store them.
+- Market and commodity selectors are plain dropdowns over the full lists. With thousands of markets, the command palette (`Ctrl+K`) is the faster way to find one.
 - ML jobs run manually. Scheduling is not set up.
+- No automated test suite is committed. Features were verified with throwaway harnesses against a real PostgreSQL (see `docs/architecture-decisions.md`), but those depend on a local sandbox setup and are not part of the repo.
 - Medicines (NPPA) and LPG data sources from the original plan are not implemented.
 - No user accounts. The `User` and `Alert` tables exist in the schema but are unused.

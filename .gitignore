@@ -34,3 +34,6 @@ ml/__pycache__/
 *.log
 .vscode/
 .idea/
+
+# TypeScript incremental build info
+*.tsbuildinfo

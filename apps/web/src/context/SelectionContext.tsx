@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState, type PropsWithChildren } from "react";
+import { createContext, useCallback, useContext, useMemo, type PropsWithChildren } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useCommodities, useMarkets } from "../hooks/useReferenceData";
 import type { Commodity, Market } from "../api/types";
 
@@ -9,37 +10,58 @@ interface SelectionContextValue {
   selectedCommodity: Commodity | null;
   selectMarketId: (id: string) => void;
   selectCommodityId: (id: string) => void;
+  /** Query string ("?market=..&commodity=..") for whatever the user has
+   *  explicitly chosen, so navigation links can carry the selection along. */
+  selectionQuery: string;
 }
 
 const SelectionContext = createContext<SelectionContextValue | null>(null);
 
+/**
+ * The URL is the source of truth for the selected market/commodity
+ * (`?market=<id>&commodity=<id>`), so a refresh, a shared link, and the
+ * browser's back/forward buttons all behave naturally. When nothing has
+ * been chosen explicitly the first item of each list is used as a default,
+ * without writing it to the URL - the URL only ever records real choices.
+ */
 export function SelectionProvider({ children }: PropsWithChildren) {
   const markets = useMarkets();
   const commodities = useCommodities();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [marketId, setMarketId] = useState<string | null>(null);
-  const [commodityId, setCommodityId] = useState<string | null>(null);
+  const marketParam = searchParams.get("market");
+  const commodityParam = searchParams.get("commodity");
 
-  // Default to the first item once each list loads, so the dashboard has a
-  // real selection on first paint rather than an empty state.
-  useEffect(() => {
-    if (markets.status === "ok" && marketId === null && markets.items.length > 0) {
-      setMarketId(markets.items[0]!.id);
-    }
-  }, [markets, marketId]);
+  const selectedMarket = useMemo(() => {
+    if (markets.status !== "ok" || markets.items.length === 0) return null;
+    return markets.items.find((m) => m.id === marketParam) ?? markets.items[0]!;
+  }, [markets, marketParam]);
 
-  useEffect(() => {
-    if (commodities.status === "ok" && commodityId === null && commodities.items.length > 0) {
-      setCommodityId(commodities.items[0]!.id);
-    }
-  }, [commodities, commodityId]);
+  const selectedCommodity = useMemo(() => {
+    if (commodities.status !== "ok" || commodities.items.length === 0) return null;
+    return commodities.items.find((c) => c.id === commodityParam) ?? commodities.items[0]!;
+  }, [commodities, commodityParam]);
 
-  const selectedMarket =
-    markets.status === "ok" ? (markets.items.find((m) => m.id === marketId) ?? null) : null;
-  const selectedCommodity =
-    commodities.status === "ok"
-      ? (commodities.items.find((c) => c.id === commodityId) ?? null)
-      : null;
+  const setParam = useCallback(
+    (key: "market" | "commodity", id: string) => {
+      // Functional update: other pages keep their own params (range, page,
+      // search...) in the same query string, so never overwrite wholesale.
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set(key, id);
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
+
+  const selectionQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (marketParam) params.set("market", marketParam);
+    if (commodityParam) params.set("commodity", commodityParam);
+    const qs = params.toString();
+    return qs ? `?${qs}` : "";
+  }, [marketParam, commodityParam]);
 
   return (
     <SelectionContext.Provider
@@ -48,8 +70,9 @@ export function SelectionProvider({ children }: PropsWithChildren) {
         commodities,
         selectedMarket,
         selectedCommodity,
-        selectMarketId: setMarketId,
-        selectCommodityId: setCommodityId,
+        selectMarketId: (id) => setParam("market", id),
+        selectCommodityId: (id) => setParam("commodity", id),
+        selectionQuery,
       }}
     >
       {children}

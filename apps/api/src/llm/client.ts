@@ -1,9 +1,21 @@
 import { env } from "../config/env.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-haiku-4-5-20251001"; // cheap, fast - this is templated
-// explanation of pre-computed numbers, not open-ended reasoning, so the
-// smallest current model is the right cost/quality tradeoff here.
+// Cheap and fast: this is templated explanation of pre-computed numbers, not
+// open-ended reasoning, so the smallest current model is the right tradeoff.
+// Configurable (ANTHROPIC_MODEL) so a model change never needs a code change.
+const MODEL = env.ANTHROPIC_MODEL;
+
+let usage = { day: "", count: 0 };
+
+/** True (and counts the call) while today's LLM budget has room. */
+function reserveCall(): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  if (usage.day !== today) usage = { day: today, count: 0 };
+  if (usage.count >= env.LLM_DAILY_CALL_LIMIT) return false;
+  usage.count += 1;
+  return true;
+}
 
 /**
  * Calls the LLM with a system prompt and a single user message. Returns
@@ -15,6 +27,7 @@ const MODEL = "claude-haiku-4-5-20251001"; // cheap, fast - this is templated
  */
 export async function generateText(systemPrompt: string, userMessage: string): Promise<string | null> {
   if (!env.ANTHROPIC_API_KEY) return null;
+  if (!reserveCall()) return null; // over today's cap: caller serves the deterministic explanation
 
   try {
     const response = await fetch(ANTHROPIC_API_URL, {

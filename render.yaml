@@ -1,0 +1,50 @@
+# Render Blueprint: one repo, two services. The database is NOT here on purpose:
+# Render's free Postgres expires after 30 days, so use Neon (see docs/DEPLOYMENT.md).
+#
+# Values marked `sync: false` are prompted for (and kept secret) the first time
+# the Blueprint is applied - nothing sensitive lives in this file.
+services:
+  # ---- API (Express + Prisma) ----
+  - type: web
+    name: marketlens-api
+    runtime: node
+    plan: free
+    region: singapore
+    # --include=dev: the TypeScript compiler and Prisma CLI are devDependencies
+    # and are needed at build time even though NODE_ENV is "production".
+    buildCommand: npm ci --include=dev && npm run build:api:prod
+    startCommand: npm run start --workspace=apps/api
+    # Liveness only - never touches the database, so health checks and
+    # keep-alive pings can't hold a scale-to-zero database awake.
+    healthCheckPath: /api/v1/health/live
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL # Neon connection string, e.g. ...?sslmode=require&connect_timeout=15
+        sync: false
+      - key: CORS_ORIGIN # the web service's public URL, no trailing slash
+        sync: false
+      - key: ANTHROPIC_API_KEY # optional; omit for deterministic explanations
+        sync: false
+      - key: LLM_DAILY_CALL_LIMIT
+        value: "200"
+
+  # ---- Web (static Vite build) ----
+  - type: web
+    name: marketlens-web
+    runtime: static
+    region: singapore
+    buildCommand: npm ci --include=dev && npm run build --workspace=apps/web
+    staticPublishPath: apps/web/dist
+    # Client-side routing: any path that isn't a file serves index.html.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: VITE_API_BASE_URL # baked in at build time; must end in /api
+        sync: false
