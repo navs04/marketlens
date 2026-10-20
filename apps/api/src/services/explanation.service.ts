@@ -49,7 +49,10 @@ async function buildStructuredSignal(marketId: string, commodityId: string): Pro
   if (!market || !commodity || !summary) return null;
 
   const [latestAnomaly, forecastResult, spikeRisk] = await Promise.all([
-    prisma.anomalyFlag.findFirst({ where: { marketId, commodityId }, orderBy: { date: "desc" } }),
+    // Only flagged days are stored, so "is the current price unusual?" means
+    // "is there a flagged row for the latest price date" - NOT "what is the
+    // newest row", which could be an anomaly from months ago.
+    prisma.anomalyFlag.findFirst({ where: { marketId, commodityId, date: summary.currentDate, isAnomaly: true } }),
     forecastService.get({ marketId, commodityId }),
     spikeRiskService.latest({ marketId, commodityId }),
   ]);
@@ -76,7 +79,7 @@ async function buildStructuredSignal(marketId: string, commodityId: string): Pro
       : null,
     forecastNext: nextForecast
       ? {
-          predictedPrice: nextForecast.predictedPrice,
+          predictedPrice: Math.round(nextForecast.predictedPrice),
           forecastDate: nextForecast.forecastDate.toISOString().slice(0, 10),
           horizonDays: nextForecast.horizonDays,
         }
@@ -88,13 +91,16 @@ async function buildStructuredSignal(marketId: string, commodityId: string): Pro
   };
 }
 
+/** Whole rupees with Indian digit grouping - prices are shown to people, not parsed. */
+const rupees = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+
 function buildDeterministicExplanation(s: StructuredSignal): string {
   const direction = s.deviationPct > 0 ? "above" : s.deviationPct < 0 ? "below" : "in line with";
   const sentences: string[] = [];
 
   sentences.push(
-    `The current modal price of ${s.commodityName} in ${s.marketName} is ₹${s.currentPrice}, ` +
-      `which is ${Math.abs(s.deviationPct)}% ${direction} the ${s.windowDays}-day average of ₹${s.baselineAverage} ` +
+    `The current modal price of ${s.commodityName} in ${s.marketName} is ${rupees(s.currentPrice)}, ` +
+      `which is ${Math.abs(Math.round(s.deviationPct * 10) / 10)}% ${direction} the ${s.windowDays}-day average of ${rupees(s.baselineAverage)} ` +
       `(based on ${s.dataPointsInWindow} day${s.dataPointsInWindow === 1 ? "" : "s"} of recent data).`,
   );
 
@@ -108,7 +114,7 @@ function buildDeterministicExplanation(s: StructuredSignal): string {
 
   if (s.forecastNext) {
     sentences.push(
-      `The forecasting model expects a price of around ₹${s.forecastNext.predictedPrice} by ${s.forecastNext.forecastDate}.`,
+      `The forecasting model expects a price of around ${rupees(s.forecastNext.predictedPrice)} by ${s.forecastNext.forecastDate}.`,
     );
   }
 

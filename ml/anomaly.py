@@ -9,9 +9,14 @@ A day is flagged isAnomaly=True when |z-score| exceeds Z_THRESHOLD.
 This is a standard, explainable baseline - not a learned model - which is
 the right amount of sophistication for the data volumes a single
 market+commodity pair in this dataset actually has (see MIN_POINTS below).
-Every scored day is written, not just anomalous ones, so the historical
-"expected vs observed" line can be charted even where nothing unusual
-happened.
+Only FLAGGED days are stored. Every day is scored in memory, but writing a
+row for each scored day of each market+commodity pair made this table the
+largest in the database (485 MB of a 1 GB database in the real dataset) while
+nothing reads the unflagged rows: the chart marks only flagged days, the
+feed and the overview count only flagged days, and "is today's price
+unusual?" is answered by asking whether a flagged row exists for that date.
+Each run replaces a pair's rows, so re-running is idempotent and also
+removes rows written by earlier versions that stored every day.
 """
 
 import json
@@ -49,9 +54,14 @@ def score_series(df):
     ]
 
 
-def upsert_anomaly_flags(engine, market_id: str, commodity_id: str, scored) -> int:
-    if scored.empty:
-        return 0
+def replace_anomaly_flags(engine, market_id: str, commodity_id: str, scored) -> int:
+    """Replaces this pair's stored anomalies with the flagged days from `scored`.
+
+    Delete + insert in one transaction, so a re-run (or a change of threshold)
+    can never leave behind a day that is no longer flagged, and a failed run
+    leaves the previous rows untouched. Returns the number of rows stored.
+    """
+    flagged = scored[scored["is_anomaly"]]
 
     rows = [
         {
@@ -62,13 +72,13 @@ def upsert_anomaly_flags(engine, market_id: str, commodity_id: str, scored) -> i
             "observedPrice": float(row.observed),
             "expectedPrice": float(row.expected),
             "deviationPct": float(row.deviation_pct),
-            "isAnomaly": bool(row.is_anomaly),
+            "isAnomaly": True,
             "method": METHOD,
         }
-        for row in scored.itertuples()
+        for row in flagged.itertuples()
     ]
 
-    upsert_sql = text(
+    insert_sql = text(
         """
         INSERT INTO "AnomalyFlag"
             ("id", "marketId", "commodityId", "date", "observedPrice", "expectedPrice",
@@ -76,16 +86,15 @@ def upsert_anomaly_flags(engine, market_id: str, commodity_id: str, scored) -> i
         VALUES
             (:id, :marketId, :commodityId, :date, :observedPrice, :expectedPrice,
              :deviationPct, :isAnomaly, :method)
-        ON CONFLICT ("marketId", "commodityId", "date", "method")
-        DO UPDATE SET
-            "observedPrice" = EXCLUDED."observedPrice",
-            "expectedPrice" = EXCLUDED."expectedPrice",
-            "deviationPct" = EXCLUDED."deviationPct",
-            "isAnomaly" = EXCLUDED."isAnomaly"
         """
     )
     with engine.begin() as conn:
-        conn.execute(upsert_sql, rows)
+        conn.execute(
+            text('DELETE FROM "AnomalyFlag" WHERE "marketId" = :m AND "commodityId" = :c AND "method" = :method'),
+            {"m": market_id, "c": commodity_id, "method": METHOD},
+        )
+        if rows:
+            conn.execute(insert_sql, rows)
     return len(rows)
 
 
@@ -136,8 +145,7 @@ def run():
             )
             continue
 
-        upsert_anomaly_flags(engine, market_id, commodity_id, scored)
-        anomalies_found = int(scored["is_anomaly"].sum())
+        anomalies_found = replace_anomaly_flags(engine, market_id, commodity_id, scored)
         total_flagged += anomalies_found
         total_scored += len(scored)
 
@@ -148,7 +156,7 @@ def run():
         )
         print(f"  {commodity_name} @ {market_name}: scored {len(scored)} days, {anomalies_found} flagged")
 
-    print(f"\nDone. {total_scored} day-scores written, {total_flagged} flagged as anomalies.")
+    print(f"\nDone. {total_scored} days scored, {total_flagged} flagged and stored.")
 
 
 if __name__ == "__main__":

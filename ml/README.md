@@ -42,7 +42,7 @@ duplicating them.
 
 | Job | Method | Minimum days of history per market+commodity pair |
 |---|---|---|
-| `anomaly.py` | Rolling 14-day mean/std z-score (no leakage - only prior days inform each day's baseline) | 19 |
+| `anomaly.py` | Rolling 14-day mean/std z-score (no leakage - only prior days inform each day's baseline). Stores **only flagged days**; each run replaces a pair's rows | 19 |
 | `forecast.py` | Compares a naive persistence baseline against a linear trend model on a held-out, time-ordered 7-day test split; forecasts from whichever actually wins | 21 |
 | `spike_risk.py` | Transparent weighted heuristic (not a trained classifier - see the module docstring for why) combining the anomaly signal, forecast trend, and recent volatility | 19 (plus needs `anomaly.py` and `forecast.py` to have already run) |
 

@@ -30,9 +30,9 @@ export const anomalyService = {
 
   /**
    * Recent anomalies across every market/commodity - the "Price
-   * Intelligence" browsing feed. Only rows where isAnomaly=true; the
-   * detector also writes non-anomalous rows (every day gets scored, not
-   * just flagged ones) so this feed isn't drowned in "normal" entries.
+   * Intelligence" browsing feed. The detector stores only flagged days, so
+   * isAnomaly is true for every stored row; the filter stays as a guard
+   * against rows written by older versions that stored every scored day.
    */
   async feed({ limit }: { limit: number }) {
     return prisma.anomalyFlag.findMany({

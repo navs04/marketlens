@@ -12,16 +12,46 @@
 - The repo must be on GitHub (hosts deploy from Git), **including** `apps/api/prisma/migrations/`.
 - Apply this release (it adds `render.yaml`, a DB-free `/api/v1/health/live`, an LLM daily cap, and frontend cold-start retries).
 
-## 1. Check your data fits (the decision that matters)
-Run against your local database:
+## 1. Make your data fit (do this before anything else)
+Neon's free tier is 0.5 GB. A real run of this project measured **1059 MB**, of which `PriceObservation` was 531 MB and `AnomalyFlag` 485 MB. Check yours:
 ```sql
 SELECT pg_size_pretty(pg_database_size(current_database())) AS database;
 SELECT relname, pg_size_pretty(pg_total_relation_size(oid)) AS total
 FROM pg_class WHERE relname IN ('PriceObservation','AnomalyFlag','ForecastResult','SpikeRiskScore','Market','Commodity')
 ORDER BY pg_total_relation_size(oid) DESC;
 ```
-- **Under ~400 MB:** Neon free works.
-- **Over 500 MB:** it will not fit free. Options: (a) pay Neon's usage-based plan (a ~1 GB database costs a few dollars/month), or (b) deploy a subset: restrict to the commodities you want to show, then `VACUUM FULL`. `PriceObservation.sourceRecord` is a long traceability string per row; clearing it (`UPDATE "PriceObservation" SET "sourceRecord" = NULL; VACUUM FULL "PriceObservation";`) is the cheapest single reduction, at the cost of row-level traceability in the deployed copy.
+**Work on a copy, not your working database**, because the steps below delete data:
+```sql
+-- run from a different database (e.g. postgres); no one may be connected to marketlens
+CREATE DATABASE marketlens_deploy TEMPLATE marketlens;
+```
+**Step 1 (always): store only flagged anomalies.** Older versions of the anomaly job wrote a row for every scored day; only the flagged ones are ever used. With the current code, re-running the job replaces each pair's rows with just its flagged days:
+```bash
+cd ml && DATABASE_URL="<copy's URL>" python anomaly.py     # or: python run_all.py
+```
+then reclaim the disk space (deleting rows alone does not shrink the file):
+```sql
+VACUUM FULL "AnomalyFlag";
+```
+(Equivalent and faster: `DELETE FROM "AnomalyFlag" WHERE NOT "isAnomaly"; VACUUM FULL "AnomalyFlag";`.) In the real run this removes most of the 485 MB; re-measure to see your number. Expect the database to land around 600 MB, which is still over 500 MB.
+
+**Step 2: pick one.**
+- **(a) Pay.** Neon's paid plan is usage-based; a ~600 MB database is cheap, but check the pricing page for the current rates and any minimum. Simplest, and keeps the full year of data for every commodity.
+- **(b) Keep fewer commodities.** `PriceObservation` is most of what is left. Keep the commodities you want to show:
+  ```sql
+  SELECT c.name, COUNT(*) AS observations
+  FROM "PriceObservation" po JOIN "Commodity" c ON c.id = po."commodityId"
+  GROUP BY c.name ORDER BY observations DESC;
+
+  -- keep your chosen list; deleting a commodity cascades to its prices and ML rows
+  DELETE FROM "Commodity" WHERE name NOT IN ('Onion','Potato','Tomato' /* ...your list... */);
+  DELETE FROM "Market" m WHERE NOT EXISTS (SELECT 1 FROM "PriceObservation" po WHERE po."marketId" = m.id);
+  VACUUM FULL;
+  ```
+  Aim for under ~420 MB to leave headroom. This keeps the full year of history for what remains.
+- (c) Last resort: `UPDATE "PriceObservation" SET "sourceRecord" = NULL;` then `VACUUM FULL "PriceObservation";` saves a part of the table (not the indexes) and costs row-level traceability in the deployed copy.
+
+Use the **copy** (`marketlens_deploy`) as the source for step 3.
 
 ## 2. Create the database (Neon)
 1. New project, region **Singapore (aws-ap-southeast-1)** to sit next to Render's Singapore region.
@@ -30,7 +60,7 @@ ORDER BY pg_total_relation_size(oid) DESC;
 ## 3. Put your data in it (from your machine)
 **Option A, recommended: copy your local database (includes ML results).**
 ```bash
-pg_dump --no-owner --no-acl -Fc "$LOCAL_DATABASE_URL" -f marketlens.dump
+pg_dump --no-owner --no-acl -Fc "$DEPLOY_COPY_DATABASE_URL" -f marketlens.dump   # the trimmed copy from step 1
 pg_restore --no-owner --no-acl --clean --if-exists -d "$NEON_DATABASE_URL" marketlens.dump
 ```
 **Option B: rebuild it.** `DATABASE_URL="$NEON_DATABASE_URL" npm run prisma:deploy`, then `npm run ingest:csv ...`. Then run the ML pipeline: `cd ml && DATABASE_URL="$NEON_DATABASE_URL" python run_all.py` (works, but is slow over the internet because it makes many small queries; prefer running ML locally and using Option A).

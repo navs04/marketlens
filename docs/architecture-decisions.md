@@ -348,3 +348,28 @@ API: deep links, back button, pagination, debounced search, the command palette,
 drawer, and hovering an anomaly to read its tooltip. Several of those checks failed first and
 found real problems (above). What this cannot show is visual polish: spacing, alignment, and how
 it feels are still worth a look in a real browser.
+
+
+---
+
+# Anomaly storage: flagged days only
+
+The anomaly job originally wrote a row for every scored day of every market+commodity pair, on the
+theory that the full "expected vs observed" history might be charted someday. Measured on a real
+dataset, that table was **485 MB of a 1059 MB database (46%)** - and nothing reads the unflagged rows
+(the chart marks flagged days, the feed and overview count flagged days). That made the database
+about twice the size of a free hosted Postgres.
+
+Now only flagged days are stored, and each run replaces a pair's rows (delete + insert in one
+transaction), so re-runs are idempotent, a failed run leaves the old rows intact, and rows written
+by the earlier version are cleaned up automatically.
+
+One consumer needed a real fix, not just a smaller table: the AI explanation asked for the **newest
+stored anomaly row** to decide whether today's price is unusual. With only flagged days stored,
+that returns the newest *flagged* day, possibly months old, and the explanation would have called
+today's price unusual. It now asks whether a flagged row exists **for the latest price date**.
+Both cases are covered by tests against a real PostgreSQL: a pair flagged on its latest day
+("flagged as unusual"), and a pair with only older anomalies (not flagged).
+
+Also fixed in the same pass: the deterministic explanation printed unrounded prices
+(for example "around ₹925.3478179383974"); prices are now shown as whole rupees.
