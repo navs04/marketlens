@@ -51,7 +51,11 @@ model Market {
   alerts            Alert[]
 
   // A given market name is expected to be unique within a state/district,
-  // which keeps ingestion upserts idempotent.
+  // which keeps ingestion upserts idempotent. PostgreSQL treats NULLs as
+  // distinct in unique indexes, so this does NOT cover district = NULL; that
+  // case is covered by a partial unique index on (name, state) WHERE district
+  // IS NULL, created in the migration "market_unique_name_state_null_district"
+  // (Prisma's schema language cannot express partial indexes).
   @@unique([name, state, district])
   @@index([state])
 }

@@ -35,6 +35,7 @@ services:
   - type: web
     name: marketlens-web
     runtime: static
+    region: singapore
     buildCommand: npm ci --include=dev && npm run build --workspace=apps/web
     staticPublishPath: apps/web/dist
     # Client-side routing: any path that isn't a file serves index.html.
